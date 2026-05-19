@@ -25,7 +25,8 @@
     "blog:trending": "node test-hipaa-blog.js",
     "blog:weekly": "node -e \"require('./test-hipaa-blog.js')\"",
     "email:test": "node test-email.js",
-    "topics": "node test-trending-topics.js"
+    "topics": "node test-trending-topics.js",
+    "sheets:test": "node test-google-sheets.js"
   },
   "dependencies": {
     "@langchain/community": "^0.3.49",
@@ -43,6 +44,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "docx": "^9.5.1",
+    "googleapis": "^171.4.0",
     "langchain": "^0.3.30",
     "nodemailer": "^7.0.5",
     "reflect-metadata": "^0.2.2",

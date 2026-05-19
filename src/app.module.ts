@@ -7,6 +7,7 @@ import { BlogGeneratorModule } from './blog-generator/blog-generator.module';
 import { EmailModule } from './email-service/email.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { TopicResearchModule } from './topic-research/topic-research.module';
+import { GoogleSheetsModule } from './google-sheets/google-sheets.module';
 import configuration from './config/configuration';
 import * as path from 'path';
 
@@ -25,6 +26,7 @@ import * as path from 'path';
     EmailModule,
     SchedulerModule,
     TopicResearchModule,
+    GoogleSheetsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -17,12 +17,18 @@ async function createApp(): Promise<express.Application> {
     new ExpressAdapter(expressApp),
   );
 
-  // Enable CORS for frontend
+  const corsOrigins = [
+    'http://localhost:3001',
+    'http://localhost:3000',
+    ...(process.env.CORS_ORIGINS?.split(',').map((o) => o.trim()) ?? []),
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+  ].filter(Boolean);
+
   app.enableCors({
-    origin: '*',
+    origin: corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: false,
   });
 
   // Global validation pipe

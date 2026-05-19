@@ -87,4 +87,10 @@ export default () => ({
       'Top HIPAA Compliant Cloud Hosting for Startup and Enterprise'
     ]
   },
+  googleSheets: {
+    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    privateKey: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    defaultTab: process.env.GOOGLE_SHEET_DEFAULT_TAB || 'Blogs - AI mostly',
+  },
 }); 

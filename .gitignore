@@ -5,6 +5,10 @@ package-lock.json
 # Environment variables
 .env
 .env.local
+
+# Google Cloud service account keys (use env vars instead)
+ai-blog-tool-*.json
+*-ac54cf7f3dc5.json
 .env.development
 .env.production
 .env.test

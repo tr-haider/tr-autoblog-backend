@@ -5,12 +5,19 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  // Enable CORS for frontend
+  const corsOrigins = [
+    'http://localhost:3001',
+    'http://localhost:3000',
+    'https://tr-autoblog-frontend.vercel.app',
+    ...(process.env.CORS_ORIGINS?.split(',').map((o) => o.trim()) ?? []),
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+  ].filter(Boolean);
+
   app.enableCors({
-    origin: ['*'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
+    origin: corsOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: false,
   });
   
   // Global validation pipe

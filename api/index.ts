@@ -25,7 +25,17 @@ async function createApp(): Promise<express.Application> {
   ].filter(Boolean);
 
   app.enableCors({
-    origin: corsOrigins,
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        corsOrigins.includes(origin) ||
+        /\.vercel\.app$/i.test(origin)
+      ) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
     credentials: false,

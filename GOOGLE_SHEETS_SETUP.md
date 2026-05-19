@@ -37,6 +37,29 @@ You need to replace `your-sheet-id-here` with your actual Google Sheet ID.
 4. Set permission to **Viewer** (read-only)
 5. Click "Send"
 
+## ☁️ Vercel (Production)
+
+`/blog-generator/suggested-topics` works without Google Sheets. **Content tracker** needs these in **Vercel → Project → Settings → Environment Variables** (Production):
+
+| Variable | Example |
+|----------|---------|
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | `ai-blog-tool-service-account@....iam.gserviceaccount.com` |
+| `GOOGLE_PRIVATE_KEY` | Full key on **one line**, use `\n` for line breaks (not real newlines) |
+| `GOOGLE_SHEET_ID` | ID from the sheet URL |
+
+**Private key on Vercel:** copy from your JSON `private_key` field exactly as stored in local `.env` (quoted string with `\n`). Do not commit the JSON file.
+
+After adding variables, **Redeploy** the backend (Deployments → ⋯ → Redeploy).
+
+If misconfigured, the API returns **503** with JSON like:
+
+```json
+{
+  "message": "Google Sheets is not configured. Set these environment variables: GOOGLE_PRIVATE_KEY, ...",
+  "code": "GOOGLE_SHEETS_NOT_CONFIGURED"
+}
+```
+
 ## 🌐 REST API Endpoints
 
 After the backend is running (`npm run start:dev`):

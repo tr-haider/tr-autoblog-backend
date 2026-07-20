@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { google, sheets_v4 } from 'googleapis';
 import { ConfigService } from '@nestjs/config';
-import { JWT } from 'google-auth-library';
 
 function normalizePrivateKey(raw: string): string {
   let key = raw.trim();
@@ -21,7 +20,7 @@ function normalizePrivateKey(raw: string): string {
 @Injectable()
 export class GoogleSheetsService implements OnModuleInit {
   private sheets: sheets_v4.Sheets;
-  private auth: JWT;
+  private auth: InstanceType<typeof google.auth.JWT>;
   private ready = false;
   private initError: string | null = null;
   private initPromise: Promise<void> | null = null;

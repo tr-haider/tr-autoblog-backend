@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Query, Res, Param } from '@nestjs/common';
+import { Controller, Post, Body, Get, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { BlogGeneratorService } from './blog-generator.service';
 import { BlogGenerationDto, BlogPostDto } from '../dto/blog.dto';
@@ -117,19 +117,10 @@ export class BlogGeneratorController {
   }
 
   @Get('separated-links')
-  async getSeparatedLinks(): Promise<{ resources: any[], blogs: any[] }> {
-    return this.blogGeneratorService.getSeparatedLinks();
-  }
-
-  @Get('load-more-blogs/:page')
-  async loadMoreBlogLinks(@Param('page') page: string): Promise<{ blogs: any[] }> {
-    const pageNumber = parseInt(page, 10);
-    if (isNaN(pageNumber) || pageNumber < 1) {
-      throw new Error('Invalid page number');
-    }
-    
-    const blogs = await this.blogGeneratorService.loadMoreBlogLinks(pageNumber);
-    return { blogs };
+  async getSeparatedLinks(
+    @Query('refresh') refresh?: string,
+  ): Promise<{ resources: any[]; blogs: any[]; portfolio: any[] }> {
+    return this.blogGeneratorService.getSeparatedLinks(refresh === 'true');
   }
 
   @Get('health')

@@ -19,6 +19,10 @@ export interface BlogGenerationRequest {
   tone?: 'professional' | 'casual' | 'technical' | 'executive';
   includeRegulatoryInfo?: boolean;
   selectedLinks?: string[];
+  metaTitle?: string;
+  metaDescription?: string;
+  angle?: string;
+  cta?: string;
 }
 
 export interface BlogGenerationResponse {

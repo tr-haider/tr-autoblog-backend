@@ -30,6 +30,22 @@ export class BlogGenerationDto {
   @IsArray()
   @IsString({ each: true })
   selectedLinks?: string[];
+
+  @IsOptional()
+  @IsString()
+  metaTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  metaDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  angle?: string;
+
+  @IsOptional()
+  @IsString()
+  cta?: string;
 }
 
 export class BlogPostDto {

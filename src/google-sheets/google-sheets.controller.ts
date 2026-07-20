@@ -34,6 +34,7 @@ export class GoogleSheetsController {
     const filtered = filterContentTrackerRows(rows, {
       status: query.status,
       search: query.search,
+      relevantOnly: true,
     });
 
     const page = query.page ?? DEFAULT_PAGE;

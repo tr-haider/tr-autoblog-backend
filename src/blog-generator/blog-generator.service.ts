@@ -14,8 +14,13 @@ import {
   BlogGenerationResponse,
 } from '../interfaces/blog.interface';
 import { EmailService } from '../email-service/email.service';
-import { TopicResearchService, TrendingTopic } from '../topic-research/topic-research.service';
-import { WebScraperService, ResourceLink } from '../web-scraper/web-scraper.service';
+import { TopicResearchService } from '../topic-research/topic-research.service';
+import { SitemapService, SiteLink } from '../sitemap/sitemap.service';
+import {
+  buildBlogGenerationPrompt,
+  FALLBACK_TOPICS_PROMPT,
+  SUGGESTED_TOPICS_PROMPT,
+} from '../constants/prompt';
 
 @Injectable()
 export class BlogGeneratorService {
@@ -26,7 +31,7 @@ export class BlogGeneratorService {
     private configService: ConfigService,
     private emailService: EmailService,
     private topicResearchService: TopicResearchService,
-    private webScraperService: WebScraperService,
+    private sitemapService: SitemapService,
   ) {
     const provider = this.configService.get<string>('llm.provider') || 'groq';
     const model = this.configService.get<string>('llm.model') || 'llama-3.1-8b-instant';
@@ -64,23 +69,142 @@ export class BlogGeneratorService {
     }
   }
 
+  private static readonly TOKEN_BUDGET_BUFFER = 256;
+
+  private estimateTokens(text: string): number {
+    return Math.ceil(text.length / 3.5);
+  }
+
+  private getRequestTokenLimit(): number {
+    const provider = this.configService.get<string>('llm.provider') || 'groq';
+    if (provider === 'groq') {
+      return this.configService.get<number>('llm.groqRequestTokenLimit') || 6000;
+    }
+    return 128000;
+  }
+
+  private desiredCompletionTokens(targetWordCount: number): number {
+    // JSON-wrapped HTML uses ~2–2.5 tokens per word
+    return Math.min(8192, Math.max(1024, Math.ceil(targetWordCount * 2.5)));
+  }
+
+  private computeMaxCompletionTokens(prompt: string, targetWordCount: number): number {
+    const requestLimit = this.getRequestTokenLimit();
+    const promptTokens = this.estimateTokens(prompt);
+    const desired = this.desiredCompletionTokens(targetWordCount);
+    const available = requestLimit - promptTokens - BlogGeneratorService.TOKEN_BUDGET_BUFFER;
+
+    if (available < 512) {
+      throw new Error(
+        `Prompt too large (~${promptTokens} tokens) for Groq request limit (${requestLimit}). ` +
+          'Reduce outline/research text in the wizard or set GROQ_REQUEST_TOKEN_LIMIT if your tier allows more.',
+      );
+    }
+
+    return Math.min(desired, available);
+  }
+
+  private truncateForPrompt(value: string | undefined, maxChars: number): string | undefined {
+    if (!value?.trim()) return value;
+    const trimmed = value.trim();
+    if (trimmed.length <= maxChars) return trimmed;
+    return `${trimmed.slice(0, maxChars)}… [truncated]`;
+  }
+
+  private async invokeLlm(prompt: string, targetWordCount: number): Promise<string> {
+    const maxTokens = this.computeMaxCompletionTokens(prompt, targetWordCount);
+    this.logger.log(
+      `LLM invoke: ~${this.estimateTokens(prompt)} prompt tokens, max completion ${maxTokens}`,
+    );
+    const response = await this.llm.invoke(prompt, { max_tokens: maxTokens, maxTokens } as object);
+    return response.content as string;
+  }
+
+  private stripAppendedResources(htmlContent: string): string {
+    const marker = '<h2>Additional Resources for Healthcare Tech Teams</h2>';
+    const idx = htmlContent.indexOf(marker);
+    return idx >= 0 ? htmlContent.slice(0, idx).trim() : htmlContent;
+  }
+
+  private buildExpansionPrompt(
+    htmlContent: string,
+    currentWords: number,
+    targetWordCount: number,
+    minWordCount: number,
+    topic: string,
+    keywords: string[],
+  ): string {
+    const maxChars = 7000;
+    let body = this.stripAppendedResources(htmlContent);
+    if (body.length > maxChars) {
+      const half = Math.floor(maxChars / 2);
+      body =
+        body.slice(0, half) +
+        '\n\n<!-- middle sections omitted for length -->\n\n' +
+        body.slice(-half);
+    }
+
+    return `Expand this healthcare blog from ${currentWords} to at least ${minWordCount} words (target ${targetWordCount}).
+
+Add depth to every section and more examples.
+
+Return ONLY valid JSON (no markdown fences):
+{
+  "title": "...",
+  "summary": "...",
+  "content": "FULL expanded HTML — entire article, not a partial diff",
+  "topic": "${topic}",
+  "keywords": ${JSON.stringify(keywords)},
+  "status": "draft"
+}
+
+Current draft HTML:
+${body}`;
+  }
+
   async generateBlogPost(request: BlogGenerationRequest): Promise<BlogGenerationResponse> {
     const startTime = Date.now();
-    
+    const targetWordCount = request.targetWordCount || 1200;
+    const minWordCount = Math.floor(targetWordCount * 0.9);
+
     try {
-      this.logger.log(`Generating blog post for topic: ${request.topic}`);
-      
+      this.logger.log(
+        `Generating blog post for topic: ${request.topic} (target ${targetWordCount} words)`,
+      );
+
       const prompt = await this.createBlogPrompt(request);
-      const response = await this.llm.invoke(prompt);
-      
-      // Debug: Log the raw LLM response
-      this.logger.debug('Raw LLM response:', response.content);
-      
-      const blogPost = await this.parseBlogResponse(response.content as string, request);
-      
+      let rawResponse = await this.invokeLlm(prompt, targetWordCount);
+
+      this.logger.debug('Raw LLM response:', rawResponse);
+
+      let blogPost = await this.parseBlogResponse(rawResponse, request);
+
+      let expansionAttempts = 0;
+      while (blogPost.wordCount < minWordCount && expansionAttempts < 3) {
+        expansionAttempts += 1;
+        this.logger.warn(
+          `Blog too short (${blogPost.wordCount}/${minWordCount} words). Expansion pass ${expansionAttempts}/3.`,
+        );
+
+        const expansionPrompt = this.buildExpansionPrompt(
+          blogPost.content,
+          blogPost.wordCount,
+          targetWordCount,
+          minWordCount,
+          request.topic,
+          request.keywords || [],
+        );
+
+        rawResponse = await this.invokeLlm(expansionPrompt, targetWordCount);
+        blogPost = await this.parseBlogResponse(rawResponse, request);
+        this.logger.log(`After expansion pass ${expansionAttempts}: ${blogPost.wordCount} words`);
+      }
+
       const generationTime = Date.now() - startTime;
-      
-      this.logger.log(`Blog post generated successfully in ${generationTime}ms`);
+
+      this.logger.log(
+        `Blog post generated successfully in ${generationTime}ms (${blogPost.wordCount} words)`,
+      );
       
       return {
         success: true,
@@ -202,70 +326,20 @@ export class BlogGeneratorService {
     return blogs;
   }
 
-  async getSeparatedLinks(): Promise<{ resources: ResourceLink[], blogs: ResourceLink[] }> {
+  async getSeparatedLinks(
+    forceRefresh = false,
+  ): Promise<{ resources: SiteLink[]; blogs: SiteLink[]; portfolio: SiteLink[] }> {
     try {
-      return await this.webScraperService.getAllLinks();
+      return await this.sitemapService.getAllLinks(forceRefresh);
     } catch (error) {
-      this.logger.error('Failed to get separated links:', error.message);
-      return {
-        resources: await this.webScraperService.scrapeResourceLinks(),
-        blogs: await this.webScraperService.scrapeBlogLinks()
-      };
-    }
-  }
-
-  async loadMoreBlogLinks(page: number): Promise<ResourceLink[]> {
-    try {
-      return await this.webScraperService.scrapeBlogLinksFromPage(page);
-    } catch (error) {
-      this.logger.error(`Failed to load blog links for page ${page}:`, error.message);
-      return [];
+      this.logger.error('Failed to get sitemap links:', error.message);
+      return { resources: [], blogs: [], portfolio: [] };
     }
   }
 
   async generateSuggestedTopics(): Promise<any[]> {
     try {
-      const prompt = `Generate 8 trending and current software development blog topics focusing on HIPAA compliance, AI integration, and latest technology trends in healthcare software development. Each topic should address real problems faced by healthcare software developers and propose modern technology solutions.
-
-Focus specifically on these areas:
-- HIPAA compliance automation with AI/ML
-- Healthcare data security using latest technologies
-- AI-powered healthcare software solutions
-- Cloud-native healthcare applications
-- Modern API development for healthcare systems
-- Healthcare software testing and validation
-- DevOps and CI/CD for healthcare applications
-- Latest frameworks and tools for healthcare development
-- Blockchain and healthcare data integrity
-- IoT and healthcare device integration
-- Microservices architecture in healthcare
-- Edge computing for healthcare applications
-
-Each topic should be:
-1. Relevant to current 2024 technology trends
-2. Address specific healthcare/HIPAA challenges
-3. Propose AI or modern technology solutions
-4. Be actionable for software developers
-
-Return ONLY a JSON array with this exact format:
-[
-  {
-    "title": "[Specific Healthcare Development Problem] with [Latest Technology Solution]",
-    "description": "Brief description focusing on the healthcare challenge and modern technology solution",
-    "keywords": ["hipaa", "healthcare", "ai", "keyword1", "keyword2"],
-    "category": "healthcare-software-development",
-    "relevance": 9,
-    "trendingLevel": "high"
-  }
-]
-
-Make sure topics cover:
-- At least 3 topics related to HIPAA compliance automation
-- At least 2 topics about AI in healthcare software
-- At least 2 topics about latest tech trends (2024)
-- At least 1 topic about cloud-native healthcare solutions`;
-
-      const response = await this.llm.invoke(prompt);
+      const response = await this.llm.invoke(SUGGESTED_TOPICS_PROMPT);
       const content = response.content as string;
 
       this.logger.log('Generated topics from LLM:', content.substring(0, 200) + '...');
@@ -307,20 +381,7 @@ Make sure topics cover:
 
   private async generateFallbackTopics(): Promise<any[]> {
     try {
-      // Try a simpler prompt for fallback generation
-      const fallbackPrompt = `Generate 6 healthcare software development topics with HIPAA and AI focus. Return only JSON array:
-[
-  {
-    "title": "Topic title with HIPAA/AI focus",
-    "description": "Brief description",
-    "keywords": ["hipaa", "ai", "healthcare", "keyword"],
-    "category": "healthcare-software-development",
-    "relevance": 8,
-    "trendingLevel": "medium"
-  }
-]`;
-
-      const response = await this.llm.invoke(fallbackPrompt);
+      const response = await this.llm.invoke(FALLBACK_TOPICS_PROMPT);
       const content = response.content as string;
 
       // Try to extract JSON
@@ -404,68 +465,36 @@ Make sure topics cover:
   }
 
   private async createBlogPrompt(request: BlogGenerationRequest): Promise<string> {
-    const topics = this.configService.get<string[]>('blog.topics') || [];
-    const allKeywords = this.configService.get<string[]>('blog.seoKeywords') || [];
-    // Get separated links from web scraper
     const { resources, blogs } = await this.getSeparatedLinks();
     const allLinks = [...resources, ...blogs];
 
-    // Use selected links from request if provided, otherwise use auto-selection
     const relevantLinks = (request.selectedLinks && request.selectedLinks.length > 0)
       ? allLinks.filter(link => request.selectedLinks?.includes(link.url))
-      : allLinks.filter(link => 
-          request.keywords?.some(keyword => 
+      : allLinks.filter(link =>
+          request.keywords?.some(keyword =>
             link.title.toLowerCase().includes(keyword.toLowerCase()) ||
             link.description?.toLowerCase().includes(keyword.toLowerCase())
           )
         ).slice(0, 3);
 
+    const wordCount = request.targetWordCount || 1200;
 
-
-    const prompt = `Generate a professional software development blog post about: ${request.topic}
-
-Write a comprehensive blog post that focuses on a specific software development problem and its solution using AI, modern development techniques, or other technology solutions.
-
-CRITICAL WORD COUNT REQUIREMENT: Write EXACTLY ${request.targetWordCount || 1200} words. This is a strict requirement. The blog content must be approximately ${request.targetWordCount || 1200} words long.
-
-Structure the blog with:
-
-1. Start with <h1> for the main title
-2. Write an introduction that identifies the specific problem in software development (150-200 words)
-3. Create 3-4 main sections with <h2> headings covering:
-   - The problem/challenge in detail (200-300 words)
-   - Current solutions and their limitations (200-300 words)
-   - Modern technology solutions (AI, APIs, automation, etc.) (300-400 words)
-   - Implementation strategies and best practices (200-300 words)
-4. Include subsections with <h3> headings where needed
-5. Use <ul><li> for bullet points
-6. Use <strong> for important terms
-7. Include internal links naturally in the content
-8. End with a conclusion and call-to-action (100-150 words)
-9. The Additional Resources section will be automatically added at the end based on user selections
-
-IMPORTANT: The content must start with <h1>Main Title</h1> followed by the introduction paragraph.
-
-Available internal links to include: ${relevantLinks.map(l => `${l.title} (${l.url})`).join(', ')}
-
-Keywords to include: ${request.keywords?.join(', ') || 'healthcare technology, AI, compliance'}
-
-WORD COUNT TARGET: ${request.targetWordCount || 1200} words - ENSURE THE BLOG IS THIS LENGTH!
-
-IMPORTANT: DO NOT include any "Additional Resources" section in your response - this will be automatically appended based on the user's selected resources from the UI.
-
-Return ONLY a valid JSON object. DO NOT include the word count as a hardcoded number - I will calculate it from the actual content:
-{
-  "title": "Professional title about ${request.topic}",
-  "summary": "2-3 sentence summary",
-  "content": "Full HTML content with proper structure including <h1>, <h2>, <h3>, <p>, <ul><li> tags - MUST BE EXACTLY ${request.targetWordCount || 1200} WORDS (without Additional Resources section)",
-  "topic": "${request.topic}",
-  "keywords": ${JSON.stringify(request.keywords || ['healthcare', 'compliance'])},
-  "status": "draft",
-  "createdAt": "2024-01-01T00:00:00.000Z"
-}`;
-
-    return prompt;
+    return buildBlogGenerationPrompt({
+      topic: request.topic,
+      tone: request.tone || 'professional',
+      wordCount,
+      minWordCount: Math.floor(wordCount * 0.9),
+      includeRegulatoryInfo: request.includeRegulatoryInfo !== false,
+      primaryKeyword: request.keywords?.[0] || request.topic,
+      secondaryKeywords: request.keywords?.slice(1) || [],
+      keywords: request.keywords || ['healthcare', 'compliance'],
+      metaTitle: request.metaTitle,
+      metaDescription: request.metaDescription,
+      angle: this.truncateForPrompt(request.angle, 1200),
+      cta: this.truncateForPrompt(request.cta, 2000),
+      relevantLinks: relevantLinks.map((l) => ({ title: l.title, url: l.url })),
+      createdAt: new Date().toISOString(),
+    });
   }
 
   /**

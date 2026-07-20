@@ -50,11 +50,25 @@ export function mapRawRowToContentTracker(
   return row;
 }
 
+/** Rows eligible for AI blog generation from the "Blogs - AI mostly" sheet. */
+export function filterRelevantContentTrackerRows(
+  rows: ContentTrackerRowDto[],
+): ContentTrackerRowDto[] {
+  return rows.filter((r) => {
+    if (!r.title.trim()) return false;
+    const status = r.status.toLowerCase().trim();
+    if (status === 'published') return false;
+    return true;
+  });
+}
+
 export function filterContentTrackerRows(
   rows: ContentTrackerRowDto[],
-  options: { status?: string; search?: string },
+  options: { status?: string; search?: string; relevantOnly?: boolean },
 ): ContentTrackerRowDto[] {
-  let filtered = rows.filter((r) => r.title.length > 0);
+  let filtered = options.relevantOnly
+    ? filterRelevantContentTrackerRows(rows)
+    : rows.filter((r) => r.title.length > 0);
 
   if (options.status) {
     const status = options.status.toLowerCase();

@@ -5,6 +5,8 @@ export default () => ({
     model: process.env.LLM_MODEL || 'llama-3.1-8b-instant',
     apiKey: process.env.LLM_API_KEY, // Required for cloud providers
     baseUrl: process.env.LLM_BASE_URL, // Optional, for custom endpoints
+    // Groq on_demand tier: input + max_tokens must stay within this per request
+    groqRequestTokenLimit: parseInt(process.env.GROQ_REQUEST_TOKEN_LIMIT || '6000', 10),
   },
   email: {
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',

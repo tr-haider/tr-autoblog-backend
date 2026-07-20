@@ -1,6 +1,6 @@
 # AutoBlog AI - Backend API
 
-🚀 **NestJS backend for AI-powered blog generation with HIPAA compliance focus.**
+🚀 **NestJS backend for AI-powered blog generation with HIPAA compliance focus.***
 
 ## 🎯 Features
 
